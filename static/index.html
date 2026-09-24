@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mol_Smell: AI Scent Prediction & Design</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=3">
+    <script src="script.js?v=3"></script>
+    <script src="background.js?v=1" defer></script>
+    <script type="text/javascript" language="javascript" src="https://jsme-editor.github.io/dist/jsme/jsme.nocache.js"></script>
+</head>
+<body>
+    <canvas id="bg-canvas" aria-hidden="true"></canvas>
+    <div class="app-container">
+        <!-- Home Page -->
+        <div id="home-page" class="page active">
+            <h1 class="logo-large">🧬 Mol_Smell</h1>
+            <div class="home-boxes">
+                <div class="home-box" onclick="goTo('predict-page')">Predict Odor</div>
+                <div class="home-box" onclick="goTo('design-page')">Design Molecule</div>
+            </div>
+        </div>
+
+        <!-- Predict Odor Page -->
+        <div id="predict-page" class="page hidden split-page">
+            <button class="back-btn" onclick="goTo('home-page')">← Back to Home</button>
+            <div class="split-container">
+                <div class="left-pane">
+                    <h2>DRAW TO PREDICT THE ODOR</h2>
+                    <div class="editor-wrapper">
+                        <div id="jsme_container"></div>
+                    </div>
+                    <button class="btn secondary full-width" onclick="getSmilesFromEditor()">Get SMILES</button>
+                </div>
+                
+                <div class="right-pane">
+                    <h2>Enter Molecule Name/SMILES</h2>
+                    <div class="input-group">
+                        <input type="text" id="mol-input" placeholder="e.g., vanillin or CC(=O)OC1CCCCC1" />
+                        <button class="btn primary" onclick="predictOdor()">Predict Smell</button>
+                    </div>
+                    
+                    <div class="results-box hidden" id="predict-results" style="display:flex; flex-direction:column; overflow-y:auto; flex-grow:1; margin-top:2rem;">
+                        <h3>Predicted Odors:</h3>
+                        <ul id="predict-list" style="margin:0; flex-grow:1;"></ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Design Molecule Page -->
+        <div id="design-page" class="page hidden">
+            <button class="back-btn" onclick="goTo('home-page')">← Back to Home</button>
+            <div class="card design-card">
+                <h2>Design a New Molecule</h2>
+                <p class="subtitle">Mix your desired scent profile and the AI will generate novel molecules that match.</p>
+                
+                <div class="sliders-container" id="sliders-container">
+                    <!-- 20 Scent Sliders -->
+                    <div class="slider-group"><label>Woody</label><input type="range" id="slider-woody" min="0" max="1" step="0.1" value="0" oninput="updateSlider('woody')"><span id="val-woody">0.0</span></div>
+                    <div class="slider-group"><label>Fruity</label><input type="range" id="slider-fruity" min="0" max="1" step="0.1" value="0" oninput="updateSlider('fruity')"><span id="val-fruity">0.0</span></div>
+                    <div class="slider-group"><label>Floral</label><input type="range" id="slider-floral" min="0" max="1" step="0.1" value="0" oninput="updateSlider('floral')"><span id="val-floral">0.0</span></div>
+                    <div class="slider-group"><label>Sweet</label><input type="range" id="slider-sweet" min="0" max="1" step="0.1" value="0" oninput="updateSlider('sweet')"><span id="val-sweet">0.0</span></div>
+                    <div class="slider-group"><label>Earthy</label><input type="range" id="slider-earthy" min="0" max="1" step="0.1" value="0" oninput="updateSlider('earthy')"><span id="val-earthy">0.0</span></div>
+                    <div class="slider-group"><label>Citrus</label><input type="range" id="slider-citrus" min="0" max="1" step="0.1" value="0" oninput="updateSlider('citrus')"><span id="val-citrus">0.0</span></div>
+                    <div class="slider-group"><label>Herbal</label><input type="range" id="slider-herbal" min="0" max="1" step="0.1" value="0" oninput="updateSlider('herbal')"><span id="val-herbal">0.0</span></div>
+                    <div class="slider-group"><label>Spicy</label><input type="range" id="slider-spicy" min="0" max="1" step="0.1" value="0" oninput="updateSlider('spicy')"><span id="val-spicy">0.0</span></div>
+                    <div class="slider-group"><label>Green</label><input type="range" id="slider-green" min="0" max="1" step="0.1" value="0" oninput="updateSlider('green')"><span id="val-green">0.0</span></div>
+                    <div class="slider-group"><label>Musk</label><input type="range" id="slider-musk" min="0" max="1" step="0.1" value="0" oninput="updateSlider('musk')"><span id="val-musk">0.0</span></div>
+                    <div class="slider-group"><label>Vanilla</label><input type="range" id="slider-vanilla" min="0" max="1" step="0.1" value="0" oninput="updateSlider('vanilla')"><span id="val-vanilla">0.0</span></div>
+                    <div class="slider-group"><label>Nutty</label><input type="range" id="slider-nutty" min="0" max="1" step="0.1" value="0" oninput="updateSlider('nutty')"><span id="val-nutty">0.0</span></div>
+                    <div class="slider-group"><label>Minty</label><input type="range" id="slider-minty" min="0" max="1" step="0.1" value="0" oninput="updateSlider('minty')"><span id="val-minty">0.0</span></div>
+                    <div class="slider-group"><label>Fresh</label><input type="range" id="slider-fresh" min="0" max="1" step="0.1" value="0" oninput="updateSlider('fresh')"><span id="val-fresh">0.0</span></div>
+                    <div class="slider-group"><label>Balsamic</label><input type="range" id="slider-balsamic" min="0" max="1" step="0.1" value="0" oninput="updateSlider('balsamic')"><span id="val-balsamic">0.0</span></div>
+                    <div class="slider-group"><label>Roasted</label><input type="range" id="slider-roasted" min="0" max="1" step="0.1" value="0" oninput="updateSlider('roasted')"><span id="val-roasted">0.0</span></div>
+                    <div class="slider-group"><label>Waxy</label><input type="range" id="slider-waxy" min="0" max="1" step="0.1" value="0" oninput="updateSlider('waxy')"><span id="val-waxy">0.0</span></div>
+                    <div class="slider-group"><label>Sulfurous</label><input type="range" id="slider-sulfurous" min="0" max="1" step="0.1" value="0" oninput="updateSlider('sulfurous')"><span id="val-sulfurous">0.0</span></div>
+                    <div class="slider-group"><label>Rose</label><input type="range" id="slider-rose" min="0" max="1" step="0.1" value="0" oninput="updateSlider('rose')"><span id="val-rose">0.0</span></div>
+                    <div class="slider-group"><label>Camphor</label><input type="range" id="slider-camphor" min="0" max="1" step="0.1" value="0" oninput="updateSlider('camphor')"><span id="val-camphor">0.0</span></div>
+                </div>
+                
+                <button class="btn primary full-width" onclick="generateMolecules()">Generate Molecules</button>
+
+                <div class="results-box hidden scrollable-results" id="generate-results">
+                    <h3>Generated Molecules:</h3>
+                    <div class="mol-grid" id="generate-grid"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
