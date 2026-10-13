@@ -23,8 +23,13 @@ function goTo(pageId) {
 
 function getSmilesFromEditor() {
     if (jsmeApplet) {
-        const smiles = jsmeApplet.smiles();
+        const smiles = (jsmeApplet.smiles() || "").trim();
+        if (!smiles) {
+            alert("Please draw a chemical structure in the editor first.");
+            return;
+        }
         document.getElementById('mol-input').value = smiles;
+        predictOdor();
     }
 }
 
@@ -44,7 +49,7 @@ async function predictOdor() {
     const list = document.getElementById('predict-list');
     
     resultsBox.classList.remove('hidden');
-    list.innerHTML = '<li>Analyzing molecule...</li>';
+    list.innerHTML = '<li>Analyzing molecule and predicting odor profile...</li>';
 
     try {
         const response = await fetch('/api/predict', {
@@ -61,6 +66,50 @@ async function predictOdor() {
 
         list.innerHTML = ''; // Clear loading text
         
+        // Remove legacy preview container if present
+        const oldPreview = resultsBox.querySelector('.predict-img-container');
+        if (oldPreview) oldPreview.remove();
+
+        // High-definition Molecule Info Banner
+        let banner = resultsBox.querySelector('.molecule-info-banner');
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.className = 'molecule-info-banner';
+            resultsBox.insertBefore(banner, list);
+        }
+        
+        const formulaText = data.formula ? data.formula : 'N/A';
+        const weightText = data.mol_weight ? `${data.mol_weight} g/mol` : 'N/A';
+        const isNovel = data.name.startsWith("Novel Molecule");
+        
+        banner.innerHTML = `
+            <img class="mol-structure-img" src="/api/molecule_image?smiles=${encodeURIComponent(data.smiles)}" alt="${data.name}" />
+            <div class="mol-meta-grid">
+                <div class="mol-meta-item">
+                    <span class="label">Molecule Name</span>
+                    <span class="val name-tag">${data.name}</span>
+                </div>
+                <div class="mol-meta-item">
+                    <span class="label">SMILES String</span>
+                    <span class="val" title="${data.smiles}">${data.smiles}</span>
+                </div>
+                <div class="mol-meta-item">
+                    <span class="label">Formula & Mass</span>
+                    <span class="val">${formulaText} • ${weightText}</span>
+                </div>
+            </div>
+        `;
+        
+        // Update Title
+        const titleEl = resultsBox.querySelector('h3');
+        if (titleEl) {
+            if (!isNovel) {
+                titleEl.innerHTML = `Predicted Odor Profile for <span style="color: #00f2fe;">${data.name}</span>:`;
+            } else {
+                titleEl.innerHTML = `Predicted Odor Profile for Novel Structure:`;
+            }
+        }
+
         // Populate list
         data.predictions.forEach(pred => {
             const li = document.createElement('li');
@@ -136,14 +185,22 @@ async function generateMolecules() {
             const card = document.createElement('div');
             card.className = 'mol-card';
             
-            // Image
+            // Crisp RDKit 2D Vector Drawing (Always generated & centered)
             const img = document.createElement('img');
-            img.src = `https://cactus.nci.nih.gov/chemical/structure/${encodeURIComponent(cand.smiles)}/image`;
-            img.onerror = () => { img.style.display = 'none'; }; // Hide if image fails to load
+            img.src = `/api/molecule_image?smiles=${encodeURIComponent(cand.smiles)}`;
+            img.alt = cand.name;
+            img.loading = 'lazy';
             
             card.appendChild(img);
             
+            const nameEl = document.createElement('h4');
+            nameEl.style.margin = "5px 0";
+            nameEl.innerText = cand.name;
+            card.appendChild(nameEl);
+            
             const p = document.createElement('p');
+            p.style.fontSize = "0.8em";
+            p.style.wordBreak = "break-all";
             p.innerText = cand.smiles;
             card.appendChild(p);
             
@@ -151,10 +208,28 @@ async function generateMolecules() {
             score.innerText = `Match Score: ${cand.score.toFixed(2)}`;
             card.appendChild(score);
             
+            const inspectBtn = document.createElement('button');
+            inspectBtn.className = 'btn secondary';
+            inspectBtn.style.marginTop = '8px';
+            inspectBtn.style.padding = '4px 8px';
+            inspectBtn.style.fontSize = '0.75rem';
+            inspectBtn.innerText = 'Test Odor Profile →';
+            inspectBtn.onclick = () => inspectCandidate(cand.smiles);
+            card.appendChild(inspectBtn);
+            
             grid.appendChild(card);
         });
         
     } catch (error) {
         grid.innerHTML = `<p style="color: #ef4444;">Error: ${error.message}</p>`;
+    }
+}
+
+function inspectCandidate(smiles) {
+    goTo('predict-page');
+    const input = document.getElementById('mol-input');
+    if (input) {
+        input.value = smiles;
+        predictOdor();
     }
 }

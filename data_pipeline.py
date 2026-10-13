@@ -20,7 +20,10 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 from sklearn.preprocessing import MultiLabelBinarizer
 
-import pyrfume
+try:
+    import pyrfume
+except ImportError:
+    pyrfume = None
 
 from rdkit.Chem.Scaffolds import MurckoScaffold
 
@@ -31,6 +34,25 @@ def clean_label(text):
     text = str(text).lower().strip()
     text = re.sub(r"[^a-z0-9\- ]", "", text)
     return text.strip()
+
+
+def safe_parse_labels(val):
+    """Safely parses string or list into a list of cleaned odor labels."""
+    if isinstance(val, list):
+        return [clean_label(x) for x in val if clean_label(x)]
+    if pd.isna(val):
+        return []
+    if isinstance(val, str):
+        val = val.strip()
+        if val.startswith("[") and val.endswith("]"):
+            try:
+                parsed = ast.literal_eval(val)
+                if isinstance(parsed, list):
+                    return [clean_label(x) for x in parsed if clean_label(x)]
+            except Exception:
+                pass
+        return [clean_label(w) for w in re.split(r"[;,]", val) if clean_label(w)]
+    return []
 
 
 def get_canonical_smiles(smi):
@@ -44,48 +66,82 @@ def get_canonical_smiles(smi):
 # ---------------------------------------------------------------------------
 # 1. Load raw data from multiple Pyrfume archives
 # ---------------------------------------------------------------------------
+def _check_pyrfume():
+    if pyrfume is None:
+        raise ImportError(
+            "The 'pyrfume' package is required to load raw datasets. "
+            "Please install it using `pip install pyrfume` or ensure 'harmonized_olfaction_dataset.csv' exists."
+        )
+
+
 def load_leffingwell():
+    _check_pyrfume()
     molecules = pyrfume.load_data("leffingwell/molecules.csv")
     behavior = pyrfume.load_data("leffingwell/behavior_sparse.csv")
     molecules.index.name = "CID"
     behavior.index.name = "CID"
     df = molecules.join(behavior, how="inner").dropna(subset=["IsomericSMILES", "Labels"])
-    df["Labels"] = df["Labels"].apply(ast.literal_eval)
-    df["Labels"] = df["Labels"].apply(lambda lst: [clean_label(x) for x in lst if clean_label(x)])
+    df["Labels"] = df["Labels"].apply(safe_parse_labels)
     df["SMILES"] = df["IsomericSMILES"].apply(get_canonical_smiles)
-    return df.dropna(subset=["SMILES"])[["SMILES", "Labels"]]
+    if "name" in df.columns:
+        df["Name"] = df["name"].fillna(df.get("IUPACName", ""))
+    elif "IUPACName" in df.columns:
+        df["Name"] = df["IUPACName"]
+    else:
+        df["Name"] = ""
+    return df.dropna(subset=["SMILES"])[["SMILES", "Name", "Labels"]]
 
 
 def load_goodscents():
+    _check_pyrfume()
     m = pyrfume.load_data("goodscents/molecules.csv")
     b = pyrfume.load_data("goodscents/behavior.csv")
     s = pyrfume.load_data("goodscents/stimuli.csv")
     bs = b.join(s, how="inner").dropna(subset=["CID", "Descriptors"])
+    bs["CID"] = pd.to_numeric(bs["CID"], errors="coerce")
+    bs = bs.dropna(subset=["CID"])
     bs["CID"] = bs["CID"].astype(int)
     df = bs.set_index("CID").join(m, how="inner").dropna(subset=["IsomericSMILES", "Descriptors"])
-    df["Labels"] = df["Descriptors"].apply(lambda s: [clean_label(w) for w in str(s).split(";") if clean_label(w)])
+    df["Labels"] = df["Descriptors"].apply(safe_parse_labels)
     df["SMILES"] = df["IsomericSMILES"].apply(get_canonical_smiles)
-    return df.dropna(subset=["SMILES"])[["SMILES", "Labels"]]
+    if "name" in df.columns:
+        df["Name"] = df["name"].fillna(df.get("IUPACName", ""))
+    elif "IUPACName" in df.columns:
+        df["Name"] = df["IUPACName"]
+    else:
+        df["Name"] = ""
+    return df.dropna(subset=["SMILES"])[["SMILES", "Name", "Labels"]]
 
 
 def load_arctander():
+    _check_pyrfume()
     m = pyrfume.load_data("arctander_1960/molecules.csv")
     b = pyrfume.load_data("arctander_1960/behavior_1_sparse.csv")
     s = pyrfume.load_data("arctander_1960/stimuli.csv")
     bs = b.join(s, how="inner").dropna(subset=["new_CID", "Labels"])
-    bs["CID"] = bs["new_CID"].astype(int)
+    bs["CID"] = pd.to_numeric(bs["new_CID"], errors="coerce")
+    bs = bs.dropna(subset=["CID"])
+    bs["CID"] = bs["CID"].astype(int)
     df = bs.set_index("CID").join(m, how="inner").dropna(subset=["IsomericSMILES", "Labels"])
-    df["Labels"] = df["Labels"].apply(lambda s: [clean_label(w) for w in str(s).split(";") if clean_label(w)])
+    df["Labels"] = df["Labels"].apply(safe_parse_labels)
     df["SMILES"] = df["IsomericSMILES"].apply(get_canonical_smiles)
-    return df.dropna(subset=["SMILES"])[["SMILES", "Labels"]]
+    if "name" in df.columns:
+        df["Name"] = df["name"].fillna(df.get("IUPACName", ""))
+    else:
+        df["Name"] = ""
+    if "ChemicalName" in df.columns:
+        df["Name"] = df["Name"].replace("", np.nan).fillna(df["ChemicalName"])
+    df["Name"] = df["Name"].fillna("")
+    return df.dropna(subset=["SMILES"])[["SMILES", "Name", "Labels"]]
 
 
 def load_raw_data():
     """
     Loads molecules + odor descriptors across Leffingwell, GoodScents,
     and Arctander 1960 from Pyrfume, deduplicates on canonical SMILES,
-    and merges sensory descriptor vocabularies.
+    and merges sensory descriptor vocabularies and molecule names.
     """
+    _check_pyrfume()
     print("Loading Pyrfume databases...")
     df_lef = load_leffingwell()
     print(f"  [+] Leffingwell: {len(df_lef)} molecules")
@@ -99,9 +155,16 @@ def load_raw_data():
     all_dfs = pd.concat([df_lef, df_gs, df_arc], ignore_index=True)
     print(f"  [=] Total observation records: {len(all_dfs)}")
 
-    merged = all_dfs.groupby("SMILES")["Labels"].agg(
-        lambda lists: sorted(list(set(l for sublist in lists for l in sublist)))
-    ).reset_index()
+    def pick_best_name(names):
+        for n in names:
+            if isinstance(n, str) and n.strip():
+                return n.strip()
+        return ""
+
+    merged = all_dfs.groupby("SMILES").agg({
+        "Labels": lambda lists: sorted(list(set(l for sublist in lists for l in sublist))),
+        "Name": pick_best_name
+    }).reset_index()
     print(f"  [*] Unified into {len(merged)} unique canonical molecules")
     return merged
 
@@ -111,12 +174,8 @@ def load_raw_data():
 # ---------------------------------------------------------------------------
 def validate_smiles(df):
     """Drops rows whose SMILES string RDKit cannot parse."""
-    valid_rows = []
-    for _, row in df.iterrows():
-        mol = Chem.MolFromSmiles(row["SMILES"])
-        if mol is not None:
-            valid_rows.append(row)
-    cleaned = pd.DataFrame(valid_rows).reset_index(drop=True)
+    mask = df["SMILES"].apply(lambda s: Chem.MolFromSmiles(s) is not None if pd.notna(s) else False)
+    cleaned = df[mask].reset_index(drop=True)
     print(f"Validated SMILES: kept {len(cleaned)} / {len(df)} molecules")
     return cleaned
 
@@ -150,6 +209,8 @@ def binarize_labels(df, min_label_count=10):
 # ---------------------------------------------------------------------------
 def smiles_to_fingerprint(smiles, radius=2, n_bits=1024):
     mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return np.zeros((n_bits,), dtype=np.float32)
     generator = AllChem.GetMorganGenerator(radius=radius, fpSize=n_bits)
     fp = generator.GetFingerprint(mol)
     arr = np.zeros((n_bits,), dtype=np.float32)
@@ -325,7 +386,12 @@ def scaffold_split(graphs, test_size=0.2, random_state=42):
 # Convenience: run the whole pipeline end-to-end
 # ---------------------------------------------------------------------------
 def prepare_dataset(min_label_count=20, n_bits=1024):
-    df = load_raw_data()
+    import os
+    if os.path.exists("harmonized_olfaction_dataset.csv"):
+        df = pd.read_csv("harmonized_olfaction_dataset.csv")
+        df["Labels"] = df["Labels"].apply(safe_parse_labels)
+    else:
+        df = load_raw_data()
     df = validate_smiles(df)
     df, y, mlb = binarize_labels(df, min_label_count=min_label_count)
     fingerprints = build_fingerprint_matrix(df, n_bits=n_bits)

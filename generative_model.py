@@ -250,16 +250,20 @@ def latent_search(target_profile, gnn_model, vae_model, vocab, label_classes, n_
         z = torch.randn(n_samples, vae_model.latent_dim).to(device)
         sampled_indices = vae_model.sample(z, max_len=100, sos_idx=vocab.char2idx[SOS_TOKEN])
         
-    # Decode and filter valid
+    # Decode and filter valid unique molecules
     valid_candidates = []
     valid_z = []
+    seen = set()
     
     for i in range(n_samples):
         s = vocab.decode(sampled_indices[i].tolist())
         mol = Chem.MolFromSmiles(s)
         if mol is not None:
-            valid_candidates.append(s)
-            valid_z.append(z[i])
+            can_smi = Chem.MolToSmiles(mol)
+            if can_smi not in seen:
+                seen.add(can_smi)
+                valid_candidates.append(can_smi)
+                valid_z.append(z[i])
             
     if not valid_candidates:
         print("No valid molecules generated.")
@@ -303,6 +307,11 @@ def latent_search(target_profile, gnn_model, vae_model, vocab, label_classes, n_
     scores = np.zeros(len(valid_smiles))
     for idx, weight in target_indices.items():
         scores += all_preds[:, idx] * weight
+        
+    # Normalize score to be between 0 and 1
+    total_weight = sum(abs(w) for w in target_indices.values())
+    if total_weight > 0:
+        scores = scores / total_weight
         
     # Sort and return top 10
     top_indices = np.argsort(scores)[::-1][:10]
