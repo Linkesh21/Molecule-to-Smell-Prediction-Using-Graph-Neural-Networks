@@ -7,19 +7,28 @@ Automated test suite corresponding to Slide 6 ("Testing") in the Final Review pr
   - API Integration (6 tests)
 Total: 17 tests.
 
-Run directly in terminal for a clean, formatted report:
+Run directly in terminal for a clean, professional report:
     python test_suite.py
 
 Or run with pytest:
-    pytest test_suite.py -v -s
+    pytest test_suite.py -v
 """
 
+import sys
+import os
 import time
+import warnings
 import pytest
 import numpy as np
 import torch
 from rdkit import Chem
+from rdkit import RDLogger
 from fastapi import HTTPException
+
+# 1. Silence deprecation warnings and RDKit internal C++ parse logs during tests
+warnings.filterwarnings("ignore")
+RDLogger.DisableLog("rdApp.*")
+os.environ["PYTHONWARNINGS"] = "ignore"
 
 from data_pipeline import (
     prepare_dataset,
@@ -41,8 +50,16 @@ from app import (
     GenerateRequest,
 )
 
-# Global dataset cache so running tests doesn't redundantly reload data
+# Global dataset & models cache so running tests doesn't redundantly reload data
 _CACHED_DATASET = None
+_MODELS_INITIALIZED = False
+
+
+def ensure_models_loaded():
+    global _MODELS_INITIALIZED
+    if not _MODELS_INITIALIZED:
+        load_models()
+        _MODELS_INITIALIZED = True
 
 
 def get_cached_dataset():
@@ -65,7 +82,7 @@ def test_dataset_size_and_classes():
     assert len(df) == 7012, f"Expected 7,012 molecules, got {len(df)}"
     assert labels.shape[1] == 196, f"Expected 196 odor classes, got {labels.shape[1]}"
     assert df["SMILES"].nunique() == 7012, "Duplicate canonical SMILES detected in dataset"
-    print(f"       Details: Verified 7,012 molecules x 196 odor classes, 0 duplicates.")
+    return "Verified 7,012 molecules x 196 odor classes, 0 duplicates."
 
 
 def test_ethanol_graph_features():
@@ -73,10 +90,9 @@ def test_ethanol_graph_features():
     graph = smiles_to_graph("CCO")
     assert graph is not None
     assert graph.x.shape == (3, 28), f"Expected node shape (3, 28), got {graph.x.shape}"
-    # In PyTorch Geometric, 2 undirected chemical bonds = 4 directed edges
     assert graph.edge_index.shape[1] == 4, f"Expected 4 directed edges, got {graph.edge_index.shape[1]}"
     assert graph.edge_attr.shape == (4, 12), f"Expected edge attr shape (4, 12), got {graph.edge_attr.shape}"
-    print(f"       Details: Ethanol (CCO) -> Nodes {tuple(graph.x.shape)}, Edges {tuple(graph.edge_attr.shape)}.")
+    return f"Ethanol (CCO) -> Nodes {tuple(graph.x.shape)}, Edges {tuple(graph.edge_attr.shape)}."
 
 
 def test_single_atom_molecule():
@@ -86,7 +102,7 @@ def test_single_atom_molecule():
     assert graph.x.shape == (1, 28)
     assert graph.edge_index.shape == (2, 1)
     assert graph.edge_attr.shape == (1, 12)
-    print(f"       Details: Methane (C) -> 1 atom (28-d) with zero-edge self-loop (12-d).")
+    return "Methane (C) -> 1 atom (28-d) with zero-edge self-loop (12-d)."
 
 
 def test_carvone_enantiomers_encoded_differently():
@@ -99,14 +115,14 @@ def test_carvone_enantiomers_encoded_differently():
     
     assert g_r is not None and g_s is not None
     assert not torch.equal(g_r.x, g_s.x), "Chiral enantiomers should have distinct feature representations"
-    print(f"       Details: (R)-carvone (spearmint) != (S)-carvone (caraway) via chiral tags.")
+    return "(R)-carvone (spearmint) != (S)-carvone (caraway) via chiral tags."
 
 
 def test_invalid_smiles_rejected():
     """5. Invalid SMILES strings rejected cleanly by parser."""
     assert smiles_to_graph("INVALID_CHEMICAL_SMILES_STRING") is None
     assert smiles_to_graph("C1CCC") is None  # Unclosed ring
-    print(f"       Details: Syntax error string and unclosed ring 'C1CCC' cleanly rejected as None.")
+    return "Syntax error string and unclosed ring cleanly rejected as None."
 
 
 def test_morgan_fingerprint_length():
@@ -114,7 +130,7 @@ def test_morgan_fingerprint_length():
     fp = smiles_to_fingerprint("CCO", n_bits=1024, radius=2)
     assert isinstance(fp, np.ndarray)
     assert fp.shape == (1024,)
-    print(f"       Details: Morgan ECFP4 fingerprint output is exactly 1,024 bits.")
+    return "Morgan ECFP4 fingerprint output is exactly 1,024 bits."
 
 
 def test_scaffold_split_no_overlap():
@@ -129,7 +145,7 @@ def test_scaffold_split_no_overlap():
     
     assert overlap == 0, "Overlap found in scaffold split"
     assert len(train_graphs) + len(val_graphs) == len(graphs)
-    print(f"       Details: Bemis-Murcko split: {len(train_graphs)} train, {len(val_graphs)} test -> Scaffold overlap: 0.")
+    return f"Bemis-Murcko split: {len(train_graphs)} train, {len(val_graphs)} test -> Scaffold overlap: 0."
 
 
 # ============================================================================
@@ -152,25 +168,25 @@ def test_gnn_output_probability_range():
         
     assert probs.shape == (1, 196)
     assert np.all(probs >= 0.0) and np.all(probs <= 1.0)
-    print(f"       Details: SmellGNN multi-label probabilities strictly bounded in [0.0, 1.0].")
+    return "SmellGNN multi-label probabilities strictly bounded in [0.0, 1.0]."
 
 
 def test_isobutyl_acetate_fruity():
     """9. Isobutyl acetate -> 'fruity' descriptor is in top 5 predicted odors."""
-    load_models()
+    ensure_models_loaded()
     res = predict_odor(PredictRequest(molecule="isobutyl acetate"))
     top_5_odors = [p["odor"] for p in res["predictions"][:5]]
     assert "fruity" in top_5_odors, f"Expected 'fruity' in top 5, got {top_5_odors}"
-    print(f"       Details: Isobutyl acetate -> Top odors: {top_5_odors[:3]} ('fruity' verified).")
+    return f"Isobutyl acetate -> Top odors: {top_5_odors[:3]} ('fruity' verified)."
 
 
 def test_vanillin_vanilla():
     """10. Vanillin -> 'vanilla' descriptor is in top 5 predicted odors."""
-    load_models()
+    ensure_models_loaded()
     res = predict_odor(PredictRequest(molecule="vanillin"))
     top_5_odors = [p["odor"] for p in res["predictions"][:5]]
     assert "vanilla" in top_5_odors, f"Expected 'vanilla' in top 5, got {top_5_odors}"
-    print(f"       Details: Vanillin -> Top odors: {top_5_odors[:3]} ('vanilla' verified).")
+    return f"Vanillin -> Top odors: {top_5_odors[:3]} ('vanilla' verified)."
 
 
 def test_vae_validity_threshold():
@@ -195,7 +211,7 @@ def test_vae_validity_threshold():
             
     validity_rate = valid_count / n_samples
     assert validity_rate >= 0.88, f"Validity rate {validity_rate:.2%} lower than expected threshold"
-    print(f"       Details: SmilesVAE 100 samples -> Validity: {validity_rate:.1%} (>= 90% threshold).")
+    return f"SmilesVAE 100 samples -> Validity: {validity_rate:.1%} (>= 90% threshold)."
 
 
 # ============================================================================
@@ -204,36 +220,36 @@ def test_vae_validity_threshold():
 
 def test_api_predict_by_smiles():
     """12. Predict by SMILES returns 10 sorted results and correct formula (e.g. C6H12O2)."""
-    load_models()
+    ensure_models_loaded()
     res = predict_odor(PredictRequest(molecule="CC(=O)OCC(C)C"))
     assert len(res["predictions"]) == 10
     scores = [p["score"] for p in res["predictions"]]
     assert scores == sorted(scores, reverse=True)
     assert res["formula"] == "C6H12O2"
-    print(f"       Details: /api/predict (CC(=O)OCC(C)C) -> Formula: {res['formula']}, MW: {res['mol_weight']:.2f}, 10 sorted predictions.")
+    return f"Formula: {res['formula']}, MW: {res['mol_weight']:.2f}, 10 sorted predictions."
 
 
 def test_api_predict_by_name_offline():
     """13. Predict by chemical name offline ('limonene') from 7,012 local dataset."""
-    load_models()
+    ensure_models_loaded()
     res = predict_odor(PredictRequest(molecule="limonene"))
     assert res["name"].lower() == "limonene"
     assert "predictions" in res and len(res["predictions"]) == 10
-    print(f"       Details: /api/predict ('limonene') -> Resolved offline via 7,012 local dataset.")
+    return "Common name 'limonene' resolved offline via local 7,012 dataset."
 
 
 def test_api_invalid_input_http_400():
     """14. Invalid or unresolvable input raises HTTP 400 error."""
-    load_models()
+    ensure_models_loaded()
     with pytest.raises(HTTPException) as exc_info:
         predict_odor(PredictRequest(molecule="not_a_real_chemical_xyz_12345"))
     assert exc_info.value.status_code == 400
-    print(f"       Details: Unresolvable molecule raised HTTP {exc_info.value.status_code} Bad Request cleanly.")
+    return f"Unresolvable molecule raised HTTP {exc_info.value.status_code} Bad Request cleanly."
 
 
 def test_api_generate_candidates_and_scores():
     """15. /api/generate produces <= 10 unique valid candidates with scores in [0, 1]."""
-    load_models()
+    ensure_models_loaded()
     target = {"woody": 1.0, "fruity": 0.5}
     res = latent_search(target, app.gnn_model, app.vae_model, app.vocab, app.label_classes, n_samples=300)
     assert len(res) <= 10
@@ -242,7 +258,7 @@ def test_api_generate_candidates_and_scores():
     assert len(smiles_list) == len(set(smiles_list)), "Generated candidates must be unique"
     for _, score in res:
         assert 0.0 <= score <= 1.0
-    print(f"       Details: /api/generate ({target}) -> Produced {len(res)} unique valid candidates with scores in [0, 1].")
+    return f"Target {target} -> Produced {len(res)} unique valid candidates with scores in [0, 1]."
 
 
 def test_api_structure_image():
@@ -250,7 +266,7 @@ def test_api_structure_image():
     resp = get_molecule_image("Cc1ccccc1")
     assert resp.media_type == "image/svg+xml"
     assert "<svg" in resp.body.decode("utf-8")
-    print(f"       Details: /api/molecule_image ('Cc1ccccc1') -> Status 200, Content-Type: image/svg+xml.")
+    return "Status 200, Content-Type: image/svg+xml."
 
 
 def test_api_structure_image_fallback():
@@ -260,7 +276,7 @@ def test_api_structure_image_fallback():
     svg_content = resp.body.decode("utf-8")
     assert "<svg" in svg_content
     assert "Structure Preview" in svg_content
-    print(f"       Details: Malformed input to image endpoint returns graceful fallback SVG card.")
+    return "Malformed input to image endpoint returns graceful fallback SVG card."
 
 
 # ============================================================================
@@ -268,7 +284,7 @@ def test_api_structure_image_fallback():
 # ============================================================================
 
 def run_all_tests():
-    """Runs all 17 tests sequentially and displays a formatted report in the terminal."""
+    """Runs all 17 tests sequentially and displays a clean, quiet report without C++ parse noise."""
     tests = [
         # (group_name, test_func, test_id, description)
         ("DATA PIPELINE (7 TESTS)", test_dataset_size_and_classes, 1, "Dataset size 7,012 x 196, zero duplicates"),
@@ -298,6 +314,12 @@ def run_all_tests():
     print("                (Matching Final Review Slide 6 Parameters)")
     print(header_bar)
 
+    # Preload models and datasets quietly once
+    print("\n[INIT] Initializing models and molecular dataset cache...", end="", flush=True)
+    get_cached_dataset()
+    ensure_models_loaded()
+    print(" Ready.\n")
+
     current_group = None
     passed_count = 0
     failed_count = 0
@@ -306,21 +328,21 @@ def run_all_tests():
     for group, func, test_num, desc in tests:
         if group != current_group:
             current_group = group
-            print(f"\n--- [ {current_group} ] " + "-" * (54 - len(current_group)))
+            print(f"\n--- [ {current_group} ] " + "-" * (74 - len(current_group)))
 
         t0 = time.time()
         try:
-            func()
+            detail_msg = func()
             elapsed = time.time() - t0
             passed_count += 1
-            status_tag = "[PASS]"
-            print(f" {status_tag} Test {test_num:02d}: {desc} ({elapsed:.2f}s)")
+            print(f" [PASS] Test {test_num:02d}: {desc} ({elapsed:.2f}s)")
+            if detail_msg:
+                print(f"        Details: {detail_msg}")
         except Exception as e:
             elapsed = time.time() - t0
             failed_count += 1
-            status_tag = "[FAIL]"
-            print(f" {status_tag} Test {test_num:02d}: {desc} ({elapsed:.2f}s)")
-            print(f"       ERROR: {e}")
+            print(f" [FAIL] Test {test_num:02d}: {desc} ({elapsed:.2f}s)")
+            print(f"        ERROR: {e}")
 
     total_time = time.time() - t_start_total
 
