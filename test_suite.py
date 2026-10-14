@@ -22,22 +22,21 @@ import numpy as np
 import torch
 from fastapi import HTTPException
 
-# 1. Silence deprecation warnings and RDKit internal C++ parse logs
+# 1. Silence deprecation warnings
 warnings.filterwarnings("ignore")
 os.environ["PYTHONWARNINGS"] = "ignore"
 
 
 @contextmanager
 def silence_all():
-    """Completely silences stdout and stderr during imports and test execution."""
-    new_stdout = io.StringIO()
-    new_stderr = io.StringIO()
+    """Completely silences stdout and stderr to keep terminal output 100% clean."""
     old_stdout = sys.stdout
     old_stderr = sys.stderr
-    sys.stdout = new_stdout
-    sys.stderr = new_stderr
     try:
-        yield
+        with open(os.devnull, "w") as devnull:
+            sys.stdout = devnull
+            sys.stderr = devnull
+            yield
     finally:
         sys.stdout = old_stdout
         sys.stderr = old_stderr
@@ -47,7 +46,7 @@ def silence_all():
 from rdkit import Chem, RDLogger
 RDLogger.DisableLog("rdApp.*")
 
-# Import application and pipeline completely silently
+# Import application and pipeline completely silently (suppresses app.py load_models prints)
 with silence_all():
     from data_pipeline import (
         prepare_dataset,
