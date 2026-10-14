@@ -7,66 +7,84 @@ Automated test suite corresponding to Slide 6 ("Testing") in the Final Review pr
   - API Integration (6 tests)
 Total: 17 tests.
 
-Run directly in terminal for a clean, professional report:
+Run directly in terminal:
     python test_suite.py
-
-Or run with pytest:
-    pytest test_suite.py -v
 """
 
 import sys
 import os
+import io
 import time
 import warnings
+from contextlib import contextmanager
 import pytest
 import numpy as np
 import torch
-from rdkit import Chem
-from rdkit import RDLogger
 from fastapi import HTTPException
 
-# 1. Silence deprecation warnings and RDKit internal C++ parse logs during tests
+# 1. Silence deprecation warnings and RDKit internal C++ parse logs
 warnings.filterwarnings("ignore")
-RDLogger.DisableLog("rdApp.*")
 os.environ["PYTHONWARNINGS"] = "ignore"
 
-from data_pipeline import (
-    prepare_dataset,
-    smiles_to_graph,
-    smiles_to_fingerprint,
-    scaffold_split,
-    generate_scaffold,
-)
-from gnn_model import SmellGNN
-from generative_model import SmilesVAE, latent_search
-import app
-from app import (
-    load_models,
-    predict_odor,
-    get_molecule_name,
-    resolve_to_smiles,
-    get_molecule_image,
-    PredictRequest,
-    GenerateRequest,
-)
 
-# Global dataset & models cache so running tests doesn't redundantly reload data
+@contextmanager
+def silence_all():
+    """Completely silences stdout and stderr during imports and test execution."""
+    new_stdout = io.StringIO()
+    new_stderr = io.StringIO()
+    old_stdout = sys.stdout
+    old_stderr = sys.stderr
+    sys.stdout = new_stdout
+    sys.stderr = new_stderr
+    try:
+        yield
+    finally:
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
+
+
+# Import RDKit and disable internal C++ error logger
+from rdkit import Chem, RDLogger
+RDLogger.DisableLog("rdApp.*")
+
+# Import application and pipeline completely silently
+with silence_all():
+    from data_pipeline import (
+        prepare_dataset,
+        smiles_to_graph,
+        smiles_to_fingerprint,
+        scaffold_split,
+        generate_scaffold,
+    )
+    from gnn_model import SmellGNN
+    from generative_model import SmilesVAE, latent_search
+    import app
+    from app import (
+        load_models,
+        predict_odor,
+        get_molecule_name,
+        resolve_to_smiles,
+        get_molecule_image,
+        PredictRequest,
+        GenerateRequest,
+    )
+
+# Global dataset cache so running tests doesn't redundantly reload data
 _CACHED_DATASET = None
-_MODELS_INITIALIZED = False
-
-
-def ensure_models_loaded():
-    global _MODELS_INITIALIZED
-    if not _MODELS_INITIALIZED:
-        load_models()
-        _MODELS_INITIALIZED = True
 
 
 def get_cached_dataset():
     global _CACHED_DATASET
     if _CACHED_DATASET is None:
-        _CACHED_DATASET = prepare_dataset(min_label_count=20)
+        with silence_all():
+            _CACHED_DATASET = prepare_dataset(min_label_count=20)
     return _CACHED_DATASET
+
+
+def ensure_models_loaded():
+    if app.gnn_model is None:
+        with silence_all():
+            app.load_models()
 
 
 # ============================================================================
@@ -284,7 +302,7 @@ def test_api_structure_image_fallback():
 # ============================================================================
 
 def run_all_tests():
-    """Runs all 17 tests sequentially and displays a clean, quiet report without C++ parse noise."""
+    """Runs all 17 tests sequentially and displays a 100% clean report with zero module noise."""
     tests = [
         # (group_name, test_func, test_id, description)
         ("DATA PIPELINE (7 TESTS)", test_dataset_size_and_classes, 1, "Dataset size 7,012 x 196, zero duplicates"),
@@ -314,12 +332,6 @@ def run_all_tests():
     print("                (Matching Final Review Slide 6 Parameters)")
     print(header_bar)
 
-    # Preload models and datasets quietly once
-    print("\n[INIT] Initializing models and molecular dataset cache...", end="", flush=True)
-    get_cached_dataset()
-    ensure_models_loaded()
-    print(" Ready.\n")
-
     current_group = None
     passed_count = 0
     failed_count = 0
@@ -332,7 +344,8 @@ def run_all_tests():
 
         t0 = time.time()
         try:
-            detail_msg = func()
+            with silence_all():
+                detail_msg = func()
             elapsed = time.time() - t0
             passed_count += 1
             print(f" [PASS] Test {test_num:02d}: {desc} ({elapsed:.2f}s)")
@@ -354,7 +367,7 @@ def run_all_tests():
     print(f"  Tests Failed:          {failed_count}")
     print(f"  Total Execution Time:  {total_time:.2f}s")
     if failed_count == 0:
-        print("\n  >> ALL 17 TESTS PASSED SUCCESSFULLY! 100% COMPLIANT WITH PPT SLIDE 6 <<")
+        print("\n  ALL 17 TESTS PASSED SUCCESSFULLY")
     else:
         print(f"\n  >> WARNING: {failed_count} TEST(S) FAILED <<")
     print(header_bar + "\n")
